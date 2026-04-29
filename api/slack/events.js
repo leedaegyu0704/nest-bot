@@ -53,15 +53,27 @@ async function createIssue(threadTs, channel, user, question) {
       body,
     }),
   });
-  return (await res.json()).number;
+  const data = await res.json();
+  if (!res.ok) {
+    console.error('createIssue failed', res.status, data);
+    throw new Error(`createIssue ${res.status}: ${JSON.stringify(data)}`);
+  }
+  console.log('createIssue ok', data.number);
+  return data.number;
 }
 
 async function addComment(issueNumber, question) {
-  await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues/${issueNumber}/comments`, {
+  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues/${issueNumber}/comments`, {
     method: 'POST',
     headers: ghHeaders(),
     body: JSON.stringify({ body: `@claude ${question}` }),
   });
+  if (!res.ok) {
+    const data = await res.json();
+    console.error('addComment failed', res.status, data);
+    throw new Error(`addComment ${res.status}: ${JSON.stringify(data)}`);
+  }
+  console.log('addComment ok', issueNumber);
 }
 
 async function handleMention(event) {
