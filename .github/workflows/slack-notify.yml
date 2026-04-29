@@ -31,16 +31,38 @@ jobs:
           THREAD: ${{ steps.extract.outputs.thread }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          # Strip claude-code-action header/footer, keep only answer between first --- and last ---
-          clean=$(echo "$COMMENT_BODY" | awk '
+          # 1) Strip claude-code-action header/footer (between first --- and next ---)
+          stripped=$(echo "$COMMENT_BODY" | awk '
             /^---$/ { if (!started) { started=1; next } else { exit } }
             started { print }
           ')
+
+          # 2) Convert GitHub Markdown -> Slack mrkdwn
+          slack_text=$(echo "$stripped" | python3 -c '
+import sys, re
+t = sys.stdin.read()
+# Headers (### / ## / #) -> *bold*
+t = re.sub(r"^#{1,6}\s+(.*)$", r"*\1*", t, flags=re.M)
+# Bold **x** -> *x* (avoid touching code blocks is hard; do simple pass)
+t = re.sub(r"\*\*(.+?)\*\*", r"*\1*", t)
+# Italic *x* would clash with bold; skip to keep safe
+# Bullet list "- x" or "* x" -> "• x"
+t = re.sub(r"^\s*[-*]\s+", "• ", t, flags=re.M)
+# Numbered list keep as-is (Slack handles okay)
+# Links [text](url) -> <url|text>
+t = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", t)
+# Strikethrough ~~x~~ -> ~x~
+t = re.sub(r"~~(.+?)~~", r"~\1~", t)
+# Strip extra trailing whitespace
+t = re.sub(r"[ \t]+$", "", t, flags=re.M)
+sys.stdout.write(t.strip())
+')
+
           payload=$(jq -n \
             --arg channel "$CHANNEL" \
             --arg thread "$THREAD" \
-            --arg text "$clean" \
-            '{channel:$channel, thread_ts:$thread, text:$text}')
+            --arg text "$slack_text" \
+            '{channel:$channel, thread_ts:$thread, text:$text, mrkdwn:true}')
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
             -H "Content-Type: application/json; charset=utf-8" \
