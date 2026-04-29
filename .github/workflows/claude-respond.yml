@@ -88,18 +88,14 @@ jobs:
             started { print }
           ')
 
-          # 2) Convert GitHub Markdown -> Slack mrkdwn
-          slack_text=$(echo "$stripped" | python3 -c '
-import sys, re
-t = sys.stdin.read()
-t = re.sub(r"^#{1,6}\s+(.*)$", r"*\1*", t, flags=re.M)
-t = re.sub(r"\*\*(.+?)\*\*", r"*\1*", t)
-t = re.sub(r"^\s*[-*]\s+", "• ", t, flags=re.M)
-t = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", t)
-t = re.sub(r"~~(.+?)~~", r"~\1~", t)
-t = re.sub(r"[ \t]+$", "", t, flags=re.M)
-sys.stdout.write(t.strip())
-')
+          # 2) Convert GitHub Markdown -> Slack mrkdwn (via sed)
+          slack_text=$(echo "$stripped" \
+            | sed -E 's/^#{1,6}[[:space:]]+(.*)$/*\1*/' \
+            | sed -E 's/\*\*([^*]+)\*\*/*\1*/g' \
+            | sed -E 's/~~([^~]+)~~/~\1~/g' \
+            | sed -E 's/^[[:space:]]*[-*][[:space:]]+/• /' \
+            | sed -E 's/\[([^]]+)\]\(([^)]+)\)/<\2|\1>/g' \
+            | sed -E 's/[[:space:]]+$//')
 
           payload=$(jq -n \
             --arg channel "$CHANNEL" \
