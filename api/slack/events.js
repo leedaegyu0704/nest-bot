@@ -1,8 +1,29 @@
 import crypto from 'node:crypto';
 
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO = process.env.GITHUB_REPO;
+
+async function postSlackThinking(channel, threadTs) {
+  if (!SLACK_BOT_TOKEN) return;
+  try {
+    await fetch('https://slack.com/api/chat.postMessage', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body: JSON.stringify({
+        channel,
+        thread_ts: threadTs,
+        text: '🤔 생각 중...',
+      }),
+    });
+  } catch (err) {
+    console.error('postSlackThinking error', err);
+  }
+}
 
 export const config = { api: { bodyParser: false } };
 
@@ -81,6 +102,8 @@ async function handleMention(event) {
   const question = text.replace(/<@[A-Z0-9]+>/g, '').trim();
   if (!question) return;
   const slackThread = thread_ts || ts;
+
+  await postSlackThinking(channel, slackThread);
 
   const existing = await findIssueByThread(slackThread);
   if (existing) {
