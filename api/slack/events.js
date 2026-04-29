@@ -95,9 +95,18 @@ export default async function handler(req, res) {
     return res.status(200).json({ challenge: body.challenge });
   }
 
-  res.status(200).end();
+  // Ignore Slack retries to prevent duplicate processing
+  if (req.headers['x-slack-retry-num']) {
+    return res.status(200).end();
+  }
 
   if (body.type === 'event_callback' && body.event?.type === 'app_mention') {
-    handleMention(body.event).catch((err) => console.error('handleMention error', err));
+    try {
+      await handleMention(body.event);
+    } catch (err) {
+      console.error('handleMention error', err);
+    }
   }
+
+  res.status(200).end();
 }
