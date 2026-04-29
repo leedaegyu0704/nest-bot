@@ -23,6 +23,7 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v4
+
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -30,3 +31,83 @@ jobs:
           ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
           ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
           BITBUCKET_WORKSPACE: ${{ secrets.BITBUCKET_WORKSPACE }}
+
+      - name: Fetch final Claude comment + Slack thread info
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Find the latest issue comment authored by claude bot starting with the finished marker
+          comments=$(gh api -H "Accept: application/vnd.github+json" \
+            "/repos/$REPO/issues/$ISSUE_NUMBER/comments?per_page=100")
+          claude_body=$(echo "$comments" | jq -r '
+            [.[] | select(.user.login | test("claude"; "i")) | select(.body | startswith("**Claude finished"))]
+            | last
+            | .body // empty')
+
+          if [ -z "$claude_body" ]; then
+            echo "No final Claude comment found, skipping Slack notify"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract Slack channel/thread from the issue body marker
+          issue_body=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json body -q .body)
+          channel=$(echo "$issue_body" | grep -oE 'slack-channel:[^ ]+' | head -1 | cut -d: -f2)
+          thread=$(echo "$issue_body" | grep -oE 'slack-thread:[^ ]+' | head -1 | cut -d: -f2)
+
+          if [ -z "$channel" ] || [ -z "$thread" ]; then
+            echo "Slack metadata missing in issue body, skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Persist to outputs (multiline body via heredoc syntax)
+          {
+            echo "channel=$channel"
+            echo "thread=$thread"
+            echo "skip=false"
+            echo "body<<__BODY_EOF__"
+            echo "$claude_body"
+            echo "__BODY_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post answer to Slack thread
+        if: steps.pick.outputs.skip != 'true'
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          CHANNEL: ${{ steps.pick.outputs.channel }}
+          THREAD: ${{ steps.pick.outputs.thread }}
+          COMMENT_BODY: ${{ steps.pick.outputs.body }}
+        run: |
+          # 1) Strip claude-code-action header/footer (between first --- and next ---)
+          stripped=$(echo "$COMMENT_BODY" | awk '
+            /^---$/ { if (!started) { started=1; next } else { exit } }
+            started { print }
+          ')
+
+          # 2) Convert GitHub Markdown -> Slack mrkdwn
+          slack_text=$(echo "$stripped" | python3 -c '
+import sys, re
+t = sys.stdin.read()
+t = re.sub(r"^#{1,6}\s+(.*)$", r"*\1*", t, flags=re.M)
+t = re.sub(r"\*\*(.+?)\*\*", r"*\1*", t)
+t = re.sub(r"^\s*[-*]\s+", "• ", t, flags=re.M)
+t = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", t)
+t = re.sub(r"~~(.+?)~~", r"~\1~", t)
+t = re.sub(r"[ \t]+$", "", t, flags=re.M)
+sys.stdout.write(t.strip())
+')
+
+          payload=$(jq -n \
+            --arg channel "$CHANNEL" \
+            --arg thread "$THREAD" \
+            --arg text "$slack_text" \
+            '{channel:$channel, thread_ts:$thread, text:$text, mrkdwn:true}')
+
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data "$payload"
