@@ -121,13 +121,11 @@ async function handleMention(event) {
   if (!question) return;
   const slackThread = thread_ts || ts;
 
-  await postSlackThinking(channel, slackThread);
-
   const existing = await findIssueByThread(slackThread);
   if (existing) {
     await addComment(existing, question);
   } else if (event.type === 'app_mention') {
-    // Only create a new issue from explicit mention, not from arbitrary thread replies
+    await postSlackThinking(channel, slackThread);
     await createIssue(slackThread, channel, user, question);
   } else {
     console.log('thread reply ignored (no existing issue)', slackThread);
