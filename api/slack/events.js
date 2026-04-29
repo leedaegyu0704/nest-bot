@@ -52,11 +52,17 @@ const ghHeaders = () => ({
 });
 
 async function findIssueByThread(threadTs) {
-  const q = `repo:${GITHUB_REPO} in:title "[Slack:${threadTs}]" is:issue`;
-  const url = `https://api.github.com/search/issues?q=${encodeURIComponent(q)}`;
+  // Use list API instead of search to avoid indexing delay
+  const url = `https://api.github.com/repos/${GITHUB_REPO}/issues?state=all&per_page=100&sort=created&direction=desc`;
   const res = await fetch(url, { headers: ghHeaders() });
-  const data = await res.json();
-  return data.items?.[0]?.number ?? null;
+  if (!res.ok) {
+    console.error('list issues failed', res.status);
+    return null;
+  }
+  const items = await res.json();
+  const marker = `[Slack:${threadTs}]`;
+  const found = items.find((i) => i.title?.startsWith(marker));
+  return found?.number ?? null;
 }
 
 async function createIssue(threadTs, channel, user, question) {
