@@ -8,8 +8,7 @@ jobs:
   notify:
     if: |
       contains(github.event.comment.user.login, 'claude') &&
-      !contains(github.event.comment.body, '@claude') &&
-      !contains(github.event.comment.body, 'Claude Code is working')
+      startsWith(github.event.comment.body, '**Claude finished')
     runs-on: ubuntu-latest
     steps:
       - name: Extract Slack thread info from issue body
@@ -32,10 +31,15 @@ jobs:
           THREAD: ${{ steps.extract.outputs.thread }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
+          # Strip claude-code-action header/footer, keep only answer between first --- and last ---
+          clean=$(echo "$COMMENT_BODY" | awk '
+            /^---$/ { if (!started) { started=1; next } else { exit } }
+            started { print }
+          ')
           payload=$(jq -n \
             --arg channel "$CHANNEL" \
             --arg thread "$THREAD" \
-            --arg text "$COMMENT_BODY" \
+            --arg text "$clean" \
             '{channel:$channel, thread_ts:$thread, text:$text}')
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer $SLACK_BOT_TOKEN" \

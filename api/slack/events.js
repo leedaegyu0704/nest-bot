@@ -97,6 +97,18 @@ async function addComment(issueNumber, question) {
   console.log('addComment ok', issueNumber);
 }
 
+function shouldHandleThreadReply(event) {
+  // Only thread replies (must have thread_ts and not equal to ts = top-level message)
+  if (!event.thread_ts || event.thread_ts === event.ts) return false;
+  // Skip bot's own messages and other bots
+  if (event.bot_id || event.subtype === 'bot_message') return false;
+  // Skip message edits/deletes
+  if (event.subtype) return false;
+  // Skip if message contains mention (app_mention will handle it)
+  if (/<@[A-Z0-9]+>/.test(event.text || '')) return false;
+  return true;
+}
+
 async function handleMention(event) {
   const { text, channel, ts, thread_ts, user } = event;
   const question = text.replace(/<@[A-Z0-9]+>/g, '').trim();
@@ -108,8 +120,11 @@ async function handleMention(event) {
   const existing = await findIssueByThread(slackThread);
   if (existing) {
     await addComment(existing, question);
-  } else {
+  } else if (event.type === 'app_mention') {
+    // Only create a new issue from explicit mention, not from arbitrary thread replies
     await createIssue(slackThread, channel, user, question);
+  } else {
+    console.log('thread reply ignored (no existing issue)', slackThread);
   }
 }
 
@@ -135,11 +150,16 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  if (body.type === 'event_callback' && body.event?.type === 'app_mention') {
+  if (body.type === 'event_callback') {
+    const event = body.event;
     try {
-      await handleMention(body.event);
+      if (event?.type === 'app_mention') {
+        await handleMention(event);
+      } else if (event?.type === 'message' && shouldHandleThreadReply(event)) {
+        await handleMention(event);
+      }
     } catch (err) {
-      console.error('handleMention error', err);
+      console.error('event handling error', err);
     }
   }
 
