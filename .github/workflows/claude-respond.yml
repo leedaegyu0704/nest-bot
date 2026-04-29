@@ -27,6 +27,7 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--max-turns 12 --allowedTools "Bash(curl:*),Bash(jq:*),Bash(echo:*),Bash(printf:*),Bash(base64:*)"'
         env:
           ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
           ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
@@ -82,11 +83,14 @@ jobs:
           THREAD: ${{ steps.pick.outputs.thread }}
           COMMENT_BODY: ${{ steps.pick.outputs.body }}
         run: |
-          # 1) Strip claude-code-action header/footer (between first --- and next ---)
-          stripped=$(echo "$COMMENT_BODY" | awk '
-            /^---$/ { if (!started) { started=1; next } else { exit } }
-            started { print }
-          ')
+          # 1) Strip claude-code-action wrapper:
+          #    - remove the first "**Claude finished ...**" header line
+          #    - remove standalone "---" separator lines
+          #    Keep everything else (including any internal --- Claude wrote)
+          stripped=$(echo "$COMMENT_BODY" \
+            | sed -E '/^\*\*Claude finished/d' \
+            | sed -E '/^---$/d' \
+            | awk 'NF { found=1 } found')
 
           # 2) Convert GitHub Markdown -> Slack mrkdwn (via sed)
           slack_text=$(echo "$stripped" \
