@@ -42,17 +42,23 @@ jobs:
           mkdir -p workspace
           cd workspace
           REPOS="aj-nest-admin aj-nest-partners aj-platform-front aj-react-core aj-vue-core"
-          AUTH=$(printf '%s:%s' "$ATLASSIAN_EMAIL" "$ATLASSIAN_API_TOKEN" | base64 -w0)
-          GIT_AUTH=(-c "http.extraheader=Authorization: Basic $AUTH")
+          # Bitbucket Cloud git over HTTPS with API token requires
+          # username = "x-bitbucket-api-token-auth" (static, recommended for automation)
+          # ref: https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/
+          ENC_TOKEN=$(jq -rn --arg v "$ATLASSIAN_API_TOKEN" '$v|@uri')
           for repo in $REPOS; do
-            url="https://bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
+            auth_url="https://x-bitbucket-api-token-auth:${ENC_TOKEN}@bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
+            clean_url="https://bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
             if [ -d "$repo/.git" ]; then
               echo "Updating $repo..."
-              git "${GIT_AUTH[@]}" -C "$repo" fetch --depth=1 --quiet origin && \
+              git -C "$repo" remote set-url origin "$auth_url"
+              git -C "$repo" fetch --depth=1 --quiet origin && \
                 git -C "$repo" reset --hard --quiet "origin/$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')" || true
+              git -C "$repo" remote set-url origin "$clean_url"
             else
               echo "Cloning $repo..."
-              git "${GIT_AUTH[@]}" clone --depth=1 --quiet "$url" "$repo"
+              git clone --depth=1 --quiet "$auth_url" "$repo"
+              git -C "$repo" remote set-url origin "$clean_url"
             fi
           done
           du -sh */ 2>/dev/null || true
