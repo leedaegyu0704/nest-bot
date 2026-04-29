@@ -24,14 +24,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: anthropics/claude-code-action@v1
+      - name: Restore cached repos
+        id: cache-repos
+        uses: actions/cache@v4
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Bash(curl:*),Bash(jq:*),Bash(echo:*),Bash(printf:*),Bash(base64:*)"'
+          path: workspace
+          key: bb-repos-${{ github.run_id }}
+          restore-keys: |
+            bb-repos-
+
+      - name: Clone or update target repos
         env:
           ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
           ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
           BITBUCKET_WORKSPACE: ${{ secrets.BITBUCKET_WORKSPACE }}
+        run: |
+          mkdir -p workspace
+          cd workspace
+          REPOS="aj-nest-admin aj-nest-partners aj-platform-front aj-react-core aj-vue-core"
+          for repo in $REPOS; do
+            url="https://${ATLASSIAN_EMAIL}:${ATLASSIAN_API_TOKEN}@bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
+            if [ -d "$repo/.git" ]; then
+              echo "Updating $repo..."
+              git -C "$repo" remote set-url origin "$url"
+              git -C "$repo" fetch --depth=1 --quiet origin && \
+                git -C "$repo" reset --hard --quiet "origin/$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')" || true
+            else
+              echo "Cloning $repo..."
+              git clone --depth=1 --quiet "$url" "$repo"
+            fi
+          done
+          # Strip credentials from remotes after fetch (safety)
+          for repo in $REPOS; do
+            git -C "$repo" remote set-url origin "https://bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git" 2>/dev/null || true
+          done
+          du -sh */ 2>/dev/null || true
+
+      - name: Save repos cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: workspace
+          key: bb-repos-${{ github.run_id }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Read,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*)"'
+        env:
+          REPO_WORKSPACE: ${{ github.workspace }}/workspace
 
       - name: Fetch final Claude comment + Slack thread info
         id: pick

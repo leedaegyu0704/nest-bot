@@ -75,52 +75,31 @@
 
 ---
 
-## Bitbucket Cloud API 호출
+## 레포 조회 — 로컬 파일 시스템 사용
 
-**중요 규칙**:
-- 임시 스크립트 파일(`*.mjs`, `*.py`, `*.sh`) 만들지 마. 허용된 도구는 `curl`, `jq`, `echo`, `printf`, `base64`뿐
-- **API 호출은 최소한으로**. 한 질문에 보통 2~4번이면 충분
-- 디렉토리/파일을 광범위하게 탐색하지 말고, **질문의 핵심에 직결되는 경로만** 빠르게 확인
-- 한 번 호출한 결과로 충분히 답할 수 있으면 추가 호출 금지
-- 모르겠으면 추측해서 더 호출하지 말고 "어느 디렉토리/파일을 보면 될까요?" 식으로 사용자에게 되묻기
+**중요**: Bitbucket API 호출하지 마. 5개 레포는 워크플로우 시작 시 미리 clone되어 있어.
 
-### 인증 (Atlassian API Token)
-- 환경변수: `ATLASSIAN_EMAIL`, `ATLASSIAN_API_TOKEN`, `BITBUCKET_WORKSPACE`
-- App Password는 폐지됨, 반드시 API Token 사용
+### 위치
+환경변수 `REPO_WORKSPACE`에 클론 경로가 있어. 보통 `${{ github.workspace }}/workspace`.
+각 레포는 그 아래에 디렉토리로 존재:
+- `workspace/aj-nest-admin/`
+- `workspace/aj-nest-partners/`
+- `workspace/aj-platform-front/`
+- `workspace/aj-react-core/`
+- `workspace/aj-vue-core/`
 
-```bash
-AUTH=$(printf '%s:%s' "$ATLASSIAN_EMAIL" "$ATLASSIAN_API_TOKEN" | base64)
-```
+### 사용 도구
+- **`Read`**: 파일 내용 읽기
+- **`Glob`**: 패턴으로 파일 찾기 (예: `workspace/aj-platform-front/**/landing*.vue`)
+- **`Grep`**: 코드 내 키워드 검색
+- 그 외 `ls`, `cat`, `find` 같은 기본 명령
 
-### 자주 쓰는 엔드포인트
+API curl은 사용 금지. 로컬 파일 시스템이 압도적으로 빨라.
 
-```bash
-# 레포 정보
-curl -s -H "Authorization: Basic $AUTH" \
-  "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_WORKSPACE/{repo-slug}"
-
-# 디렉토리 목록 (특정 브랜치)
-curl -s -H "Authorization: Basic $AUTH" \
-  "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_WORKSPACE/{repo-slug}/src/{branch}/{path}/"
-
-# 파일 내용
-curl -s -H "Authorization: Basic $AUTH" \
-  "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_WORKSPACE/{repo-slug}/src/{branch}/{file-path}"
-
-# 최근 PR (열림)
-curl -s -H "Authorization: Basic $AUTH" \
-  "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_WORKSPACE/{repo-slug}/pullrequests?state=OPEN&pagelen=20"
-
-# 최근 커밋
-curl -s -H "Authorization: Basic $AUTH" \
-  "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_WORKSPACE/{repo-slug}/commits/{branch}?pagelen=20"
-
-# 브랜치 목록
-curl -s -H "Authorization: Basic $AUTH" \
-  "https://api.bitbucket.org/2.0/repositories/$BITBUCKET_WORKSPACE/{repo-slug}/refs/branches?pagelen=50"
-```
-
-기본 브랜치: `aj-nest-frontend`는 `main`, 그 외는 보통 `develop` 또는 `main`. 모르면 레포 정보 조회 후 `mainbranch.name` 확인.
+### 효율 규칙
+- 처음엔 `Glob`이나 `find`로 후보 좁히고, `Read`/`Grep`으로 들여다봐
+- 광범위 탐색 금지, **질문 핵심 경로만**
+- 모르면 추측해서 헤매지 말고 사용자에게 "어디 영역인지 알려주실래요?" 하고 되묻기
 
 ---
 
