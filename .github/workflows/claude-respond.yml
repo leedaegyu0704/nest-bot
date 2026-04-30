@@ -13,12 +13,21 @@ concurrency:
 jobs:
   claude:
     if: |
-      github.event.sender.type != 'Bot' &&
-      !contains(github.event.sender.login, 'claude') &&
-      !contains(github.event.sender.login, '[bot]') &&
       (
-        (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+        (
+          github.event_name == 'issues' &&
+          contains(github.event.issue.body, '@claude') &&
+          github.event.issue.user.type != 'Bot' &&
+          !contains(github.event.issue.user.login, 'claude')
+        ) ||
+        (
+          github.event_name == 'issue_comment' &&
+          contains(github.event.comment.body, '@claude') &&
+          github.event.comment.user.type != 'Bot' &&
+          !contains(github.event.comment.user.login, 'claude') &&
+          !startsWith(github.event.comment.body, '**Claude') &&
+          !contains(github.event.comment.body, 'Claude Code is working')
+        )
       )
     runs-on: ubuntu-latest
     permissions:
