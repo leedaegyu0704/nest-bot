@@ -31,13 +31,20 @@ jobs:
       )
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       issues: write
       pull-requests: write
       id-token: write
       actions: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Configure git author
+        run: |
+          git config user.name "nest-bot"
+          git config user.email "nest-bot@users.noreply.github.com"
 
       - name: Restore cached repos
         uses: actions/cache@v4
@@ -77,13 +84,9 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Read,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(curl:*),Bash(jq:*),Bash(echo:*),Bash(printf:*),Bash(base64:*)"'
+          claude_args: '--allowedTools "Read,Write,Edit,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*)"'
         env:
           REPO_WORKSPACE: ${{ github.workspace }}/workspace
-          ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
-          ATLASSIAN_DOMAIN: ${{ secrets.ATLASSIAN_DOMAIN }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-          CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
 
       - name: Pick final Claude comment + Slack metadata
         id: pick
