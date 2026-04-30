@@ -48,12 +48,12 @@ jobs:
 
       - name: Clone or update target repos
         env:
-          ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
+          BITBUCKET_API_TOKEN: ${{ secrets.BITBUCKET_API_TOKEN }}
           BITBUCKET_WORKSPACE: ${{ secrets.BITBUCKET_WORKSPACE }}
         run: |
           mkdir -p workspace && cd workspace
           REPOS="aj-nest-admin aj-nest-partners aj-platform-front aj-react-core aj-vue-core"
-          ENC_TOKEN=$(jq -rn --arg v "$ATLASSIAN_API_TOKEN" '$v|@uri')
+          ENC_TOKEN=$(jq -rn --arg v "$BITBUCKET_API_TOKEN" '$v|@uri')
           for repo in $REPOS; do
             auth_url="https://x-bitbucket-api-token-auth:${ENC_TOKEN}@bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
             clean_url="https://bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
@@ -77,9 +77,13 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--allowedTools "Read,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*)"'
+          claude_args: '--allowedTools "Read,Glob,Grep,Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(find:*),Bash(curl:*),Bash(jq:*),Bash(echo:*),Bash(printf:*),Bash(base64:*)"'
         env:
           REPO_WORKSPACE: ${{ github.workspace }}/workspace
+          ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
+          ATLASSIAN_DOMAIN: ${{ secrets.ATLASSIAN_DOMAIN }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          CONFLUENCE_API_TOKEN: ${{ secrets.CONFLUENCE_API_TOKEN }}
 
       - name: Pick final Claude comment + Slack metadata
         id: pick

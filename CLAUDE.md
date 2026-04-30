@@ -145,6 +145,87 @@
 
 ---
 
+## Jira / Confluence 조회 (Atlassian API)
+
+이사/청소 스쿼드의 스프린트 진행 상황, 이슈, 기획 문서를 묻는 질문에 답할 때 사용해.
+
+### 인증 (Jira/Confluence는 토큰이 분리됨)
+- 환경변수: `ATLASSIAN_EMAIL`, `ATLASSIAN_DOMAIN`, `JIRA_API_TOKEN`, `CONFLUENCE_API_TOKEN`
+- Atlassian API 토큰은 App별로 발급되므로 Jira/Confluence 토큰을 따로 사용
+
+```bash
+# Jira용 헤더
+JIRA_AUTH=$(printf '%s:%s' "$ATLASSIAN_EMAIL" "$JIRA_API_TOKEN" | base64 -w0)
+JIRA_HEADER="Authorization: Basic $JIRA_AUTH"
+
+# Confluence용 헤더
+CONF_AUTH=$(printf '%s:%s' "$ATLASSIAN_EMAIL" "$CONFLUENCE_API_TOKEN" | base64 -w0)
+CONF_HEADER="Authorization: Basic $CONF_AUTH"
+```
+
+**중요**: Jira 호출엔 `$JIRA_HEADER`, Confluence 호출엔 `$CONF_HEADER` — 섞이면 401.
+
+### Jira — 자주 쓰는 호출
+
+```bash
+# JQL로 이슈 검색 (가장 강력)
+curl -s -H "$JIRA_HEADER" -G \
+  --data-urlencode "jql=project = NEST AND sprint in openSprints() AND status != Done" \
+  --data-urlencode "fields=summary,status,assignee,priority" \
+  "https://$ATLASSIAN_DOMAIN/rest/api/3/search"
+
+# 특정 이슈 상세
+curl -s -H "$JIRA_HEADER" \
+  "https://$ATLASSIAN_DOMAIN/rest/api/3/issue/NEST-123"
+
+# 보드 목록
+curl -s -H "$JIRA_HEADER" \
+  "https://$ATLASSIAN_DOMAIN/rest/agile/1.0/board?type=scrum"
+
+# 보드의 활성 스프린트
+curl -s -H "$JIRA_HEADER" \
+  "https://$ATLASSIAN_DOMAIN/rest/agile/1.0/board/{boardId}/sprint?state=active"
+
+# 스프린트의 이슈
+curl -s -H "$JIRA_HEADER" \
+  "https://$ATLASSIAN_DOMAIN/rest/agile/1.0/sprint/{sprintId}/issue?fields=summary,status,assignee"
+```
+
+### 스프린트 진행률 요약 패턴
+
+```bash
+# 1) 활성 스프린트 ID 찾기 → 2) 이슈 목록 → 3) 상태별 카운트
+curl -s -H "$JIRA_HEADER" "...sprint?state=active" | jq -r '.values[] | {id, name, startDate, endDate}'
+curl -s -H "$JIRA_HEADER" "...sprint/{id}/issue?fields=status" \
+  | jq -r '.issues | group_by(.fields.status.name) | map({status: .[0].fields.status.name, count: length})'
+```
+
+답변엔 이슈 키 그대로 노출 OK (`NEST-123`). 링크는 `<https://$ATLASSIAN_DOMAIN/browse/NEST-123|NEST-123>`.
+
+### Confluence — 자주 쓰는 호출
+
+```bash
+# CQL 검색 (제목/본문)
+curl -s -H "$CONF_HEADER" -G \
+  --data-urlencode 'cql=type=page AND text ~ "이사 견적"' \
+  --data-urlencode 'limit=10' \
+  "https://$ATLASSIAN_DOMAIN/wiki/rest/api/content/search"
+
+# 특정 페이지 (본문 포함)
+curl -s -H "$CONF_HEADER" \
+  "https://$ATLASSIAN_DOMAIN/wiki/rest/api/content/{pageId}?expand=body.storage,version"
+
+# 스페이스 목록
+curl -s -H "$CONF_HEADER" "https://$ATLASSIAN_DOMAIN/wiki/rest/api/space?limit=50"
+```
+
+Confluence 본문은 HTML/storage 형식이야. 핵심만 추려서 사용자에게 자연어로 정리해줘. 원본 통째로 붙이지 말 것.
+
+### 효율 규칙 (중요)
+- JQL/CQL을 잘 활용해서 **호출 1~2번에 끝내기**. 광범위 페이징 금지
+- 응답 JSON 통째로 답변에 붙이지 말 것 — 핵심만 한국어 자연어로
+- 이슈 100개 이상 같은 큰 결과는 상위 N개만, "더 볼래요?" 유도
+
 ## 레포 조회 — 로컬 파일 시스템 사용
 
 **중요**: Bitbucket API 호출하지 마. 5개 레포는 워크플로우 시작 시 미리 clone되어 있어.
