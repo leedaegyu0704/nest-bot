@@ -14,6 +14,8 @@ jobs:
   claude:
     if: |
       github.event.sender.type != 'Bot' &&
+      !contains(github.event.sender.login, 'claude') &&
+      !contains(github.event.sender.login, '[bot]') &&
       (
         (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
