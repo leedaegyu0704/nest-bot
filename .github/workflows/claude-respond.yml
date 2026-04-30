@@ -6,11 +6,12 @@ on:
   issue_comment:
     types: [created]
 
+concurrency:
+  group: claude-respond-${{ github.event.issue.number }}
+  cancel-in-progress: ${{ github.event.sender.type != 'Bot' && !contains(github.event.sender.login, 'claude') && !contains(github.event.sender.login, '[bot]') }}
+
 jobs:
   claude:
-    concurrency:
-      group: claude-respond-${{ github.event.issue.number }}
-      cancel-in-progress: true
     if: |
       (
         (
@@ -39,43 +40,32 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Restore cached repos
-        id: cache-repos
         uses: actions/cache@v4
         with:
           path: workspace
           key: bb-repos-${{ github.run_id }}
-          restore-keys: |
-            bb-repos-
+          restore-keys: bb-repos-
 
       - name: Clone or update target repos
         env:
-          ATLASSIAN_EMAIL: ${{ secrets.ATLASSIAN_EMAIL }}
           ATLASSIAN_API_TOKEN: ${{ secrets.ATLASSIAN_API_TOKEN }}
           BITBUCKET_WORKSPACE: ${{ secrets.BITBUCKET_WORKSPACE }}
         run: |
-          mkdir -p workspace
-          cd workspace
+          mkdir -p workspace && cd workspace
           REPOS="aj-nest-admin aj-nest-partners aj-platform-front aj-react-core aj-vue-core"
-          # Bitbucket Cloud git over HTTPS with API token requires
-          # username = "x-bitbucket-api-token-auth" (static, recommended for automation)
-          # ref: https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/
           ENC_TOKEN=$(jq -rn --arg v "$ATLASSIAN_API_TOKEN" '$v|@uri')
           for repo in $REPOS; do
             auth_url="https://x-bitbucket-api-token-auth:${ENC_TOKEN}@bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
             clean_url="https://bitbucket.org/${BITBUCKET_WORKSPACE}/${repo}.git"
             if [ -d "$repo/.git" ]; then
-              echo "Updating $repo..."
               git -C "$repo" remote set-url origin "$auth_url"
               git -C "$repo" fetch --depth=1 --quiet origin && \
                 git -C "$repo" reset --hard --quiet "origin/$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD | sed 's@^origin/@@')" || true
-              git -C "$repo" remote set-url origin "$clean_url"
             else
-              echo "Cloning $repo..."
               git clone --depth=1 --quiet "$auth_url" "$repo"
-              git -C "$repo" remote set-url origin "$clean_url"
             fi
+            git -C "$repo" remote set-url origin "$clean_url"
           done
-          du -sh */ 2>/dev/null || true
 
       - name: Save repos cache
         if: always()
@@ -91,39 +81,29 @@ jobs:
         env:
           REPO_WORKSPACE: ${{ github.workspace }}/workspace
 
-      - name: Fetch final Claude comment + Slack thread info
+      - name: Pick final Claude comment + Slack metadata
         id: pick
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
         run: |
-          # Find the latest issue comment authored by claude bot starting with the finished marker
-          comments=$(gh api -H "Accept: application/vnd.github+json" \
-            "/repos/$REPO/issues/$ISSUE_NUMBER/comments?per_page=100")
-          claude_body=$(echo "$comments" | jq -r '
+          claude_body=$(gh api "/repos/$REPO/issues/$ISSUE_NUMBER/comments?per_page=100" | jq -r '
             [.[] | select(.user.login | test("claude"; "i")) | select(.body | startswith("**Claude finished"))]
-            | last
-            | .body // empty')
+            | last | .body // empty')
 
           if [ -z "$claude_body" ]; then
-            echo "No final Claude comment found, skipping Slack notify"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
-          # Extract Slack channel/thread from the issue body marker
           issue_body=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json body -q .body)
           channel=$(echo "$issue_body" | grep -oE 'slack-channel:[^ ]+' | head -1 | cut -d: -f2)
           thread=$(echo "$issue_body" | grep -oE 'slack-thread:[^ ]+' | head -1 | cut -d: -f2)
 
           if [ -z "$channel" ] || [ -z "$thread" ]; then
-            echo "Slack metadata missing in issue body, skipping"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
 
-          # Persist to outputs (multiline body via heredoc syntax)
           {
             echo "channel=$channel"
             echo "thread=$thread"
@@ -133,7 +113,7 @@ jobs:
             echo "__BODY_EOF__"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Post answer to Slack thread
+      - name: Post answer to Slack
         if: steps.pick.outputs.skip != 'true'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -141,16 +121,11 @@ jobs:
           THREAD: ${{ steps.pick.outputs.thread }}
           COMMENT_BODY: ${{ steps.pick.outputs.body }}
         run: |
-          # 1) Strip claude-code-action wrapper:
-          #    - remove the first "**Claude finished ...**" header line
-          #    - remove standalone "---" separator lines
-          #    Keep everything else (including any internal --- Claude wrote)
           stripped=$(echo "$COMMENT_BODY" \
             | sed -E '/^\*\*Claude finished/d' \
             | sed -E '/^---$/d' \
             | awk 'NF { found=1 } found')
 
-          # 2) Convert GitHub Markdown -> Slack mrkdwn (via sed)
           slack_text=$(echo "$stripped" \
             | sed -E 's/^#{1,6}[[:space:]]+(.*)$/*\1*/' \
             | sed -E 's/\*\*([^*]+)\*\*/*\1*/g' \
@@ -160,9 +135,7 @@ jobs:
             | sed -E 's/[[:space:]]+$//')
 
           payload=$(jq -n \
-            --arg channel "$CHANNEL" \
-            --arg thread "$THREAD" \
-            --arg text "$slack_text" \
+            --arg channel "$CHANNEL" --arg thread "$THREAD" --arg text "$slack_text" \
             '{channel:$channel, thread_ts:$thread, text:$text, mrkdwn:true}')
 
           curl -sS -X POST https://slack.com/api/chat.postMessage \
